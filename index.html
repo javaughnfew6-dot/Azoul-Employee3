@@ -2,69 +2,244 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Employee Dashboard - Azoul</title>
-
   <style>
-    cursor: pointer;
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f4f8;
+      padding: 20px;
+      color: #0f172a;
+    }
+    h1 { margin-top: 0; }
+    #appointments {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .card {
+      border: 1px solid #cbd5e1;
+      padding: 12px;
+      border-radius: 8px;
+      background: #f9fafb;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      align-items: center;
+    }
+    .muted { color: #64748b; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #0f172a;
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    .codes-wrap { margin-top: 8px; }
+    .card button {
+      margin-right: 6px;
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
       color: #fff;
       font-weight: bold;
     }
-    .complete { background-color: #10b981; }
-    .pending { background-color: #f59e0b; }
-    .cancel { background-color: #ef4444; }
+    .complete { background-color: #10b981; } /* green */
+    .pending  { background-color: #f59e0b; } /* yellow */
+    .cancel   { background-color: #ef4444; } /* red */
+    .error-box {
+      background: #fee2e2;
+      border: 1px solid #fecaca;
+      color: #7f1d1d;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 12px;
+      white-space: pre-wrap;
+    }
+    .empty {
+      padding: 16px;
+      border: 1px dashed #94a3b8;
+      color: #475569;
+      background: #f8fafc;
+      border-radius: 8px;
+      margin-top: 16px;
+    }
   </style>
 </head>
-
 <body>
-
   <h1>Employee Dashboard - A-Z-U-L-E</h1>
   <div id="appointments"></div>
+  <div id="errors"></div>
 
   <script>
+    // ✅ Your published CSV URL (make sure the Sheet tab is "Published to web")
     const sheetURL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQcXztfhCUIK4ju9zk4wMrLhEdkj72R0PGfnlsGDfbJ29BgC9fuQVmtoqt0eHo7Jk5nVjNzmKZe6M4H/pub?gid=1450324338&single=true&output=csv";
 
-    fetch(sheetURL)
-      .then(response => response.text())
-      .then(csv => {
-        const rows = csv.split("\n").slice(1);
-        const container = document.getElementById("appointments");
+    const container = document.getElementById("appointments");
+    const errorBox  = document.getElementById("errors");
 
-        rows.forEach(row => {
-          if (!row.trim()) return;
-          const cols = row.split(",");
+    function showError(message) {
+      console.error(message);
+      errorBox.innerHTML = `<div class="error-box"><strong>Error:</strong>\n${message}</div>`;
+    }
 
-          const name = cols[1] || "No Name";
-          const phone = cols[2] || "No Phone";
-          const service = cols[3] || "No Service";
-          const time = cols[4] || "No Time";
+    // Robust CSV parser that respects quotes and commas inside quotes
+    function parseCSV(text) {
+      const rows = [];
+      let cur = [];
+      let field = "";
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        const next = text[i + 1];
+
+        if (c === '"') {
+          if (inQuotes && next === '"') { // escaped quote
+            field += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (c === ',' && !inQuotes) {
+          cur.push(field);
+          field = "";
+        } else if ((c === '\n' || c === '\r') && !inQuotes) {
+          if (field.length || cur.length) {
+            cur.push(field);
+            rows.push(cur);
+            cur = [];
+            field = "";
+          }
+          if (c === '\r' && next === '\n') i++; // skip LF after CR
+        } else {
+          field += c;
+        }
+      }
+      if (field.length || cur.length) {
+        cur.push(field);
+        rows.push(cur);
+      }
+      return rows;
+    }
+
+    // Normalize header names to find columns by name, not index
+    function normalizeHeader(h) {
+      return (h || "")
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, " "); // keep alphanumerics
+    }
+
+    // Split codes: supports comma, semicolon, slash, pipe, or whitespace
+    function splitCodes(value) {
+      if (!value) return [];
+      return value
+        .split(/[,;|\/\s]+/g)
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    async function load() {
+      try {
+        const resp = await fetch(sheetURL, { method: "GET", mode: "cors" });
+        console.log("HTTP status:", resp.status);
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          throw new Error(`Fetch failed (${resp.status}). Body preview:\n${body.slice(0, 500)}`);
+        }
+
+        const csv = await resp.text();
+        console.log("CSV preview:", csv.slice(0, 200));
+
+        const allRows = parseCSV(csv);
+        if (allRows.length === 0) {
+          container.innerHTML = `<div class="empty">No rows found in CSV.</div>`;
+          return;
+        }
+
+        // Map headers
+        const headers = allRows[0].map(h => normalizeHeader(h));
+        const rows = allRows.slice(1).filter(r => r.some(cell => String(cell).trim().length));
+
+        // Try to find common fields by name; fall back gracefully if missing
+        const idx = {
+          name: headers.findIndex(h => /(name|full name|employee)/.test(h)),
+          phone: headers.findIndex(h => /(phone|phone number|mobile|tel)/.test(h)),
+          service: headers.findIndex(h => /(service|role|position|dept|department)/.test(h)),
+          time: headers.findIndex(h => /(time|appointment|slot|schedule|datetime|date)/.test(h)),
+          codes: headers.findIndex(h => /(code|codes|access code|employee code)/.test(h))
+        };
+
+        console.log("Header map:", idx, headers);
+
+        if (rows.length === 0) {
+          container.innerHTML = `<div class="empty">No appointments/employees found (only header was present).</div>`;
+          return;
+        }
+
+        rows.forEach(cols => {
+          const get = (i) => (i >= 0 && i < cols.length) ? cols[i] : "";
+
+          const name    = (idx.name   >= 0 ? get(idx.name)    : cols[0]) || "No Name";
+          const phone   = (idx.phone  >= 0 ? get(idx.phone)   : "");
+          const service = (idx.service>= 0 ? get(idx.service) : "");
+          const time    = (idx.time   >= 0 ? get(idx.time)    : "");
+          const codesRaw= (idx.codes  >= 0 ? get(idx.codes)   : "");
+
+          const codes = splitCodes(codesRaw);
 
           const card = document.createElement("div");
           card.className = "card";
+
+          const infoLines = [
+            `<strong>${name}</strong>`,
+            phone  ? `📞 ${phone}` : ``,
+            service? `💈 ${service}` : ``,
+            time   ? `⏰ ${time}` : ``
+          ].filter(Boolean).join("<br>");
+
+          const codesHtml = codes.length
+            ? `<div class="codes-wrap"><span class="muted">Codes:</span> ` +
+              codes.map(c => `<span class="badge">${c}</span>`).join("") +
+              `</div>`
+            : ``;
+
           card.innerHTML = `
-            <strong>${name}</strong><br>
-            📞 ${phone}<br>
-            💈 ${service}<br>
-            ⏰ ${time}<br><br>
-            <button class="complete">Complete</button>
-            <button class="pending">Pending</button>
-            <button class="cancel">Cancel</button>
+            <div class="row" style="margin-bottom:8px;">
+              <div>${infoLines}</div>
+            </div>
+            ${codesHtml}
+            <div style="margin-top:10px;">
+              <button class="complete">Complete</button>
+              <button class="pending">Pending</button>
+              <button class="cancel">Cancel</button>
+            </div>
           `;
 
-          card.querySelector(".complete").onclick = () => { card.style.background = "#d1fae5"; }
-          card.querySelector(".pending").onclick = () => { card.style.background = "#fef3c7"; }
-          card.querySelector(".cancel").onclick = () => { card.style.background = "#fee2e2"; }
+          card.querySelector(".complete").onclick = () => { card.style.background = "#d1fae5"; };
+          card.querySelector(".pending").onclick  = () => { card.style.background = "#fef3c7"; };
+          card.querySelector(".cancel").onclick   = () => { card.style.background = "#fee2e2"; };
 
           container.appendChild(card);
         });
-      });
-  </script>
+      } catch (err) {
+        showError(err.stack || err.message || String(err));
+      }
+    }
 
+    load();
+  </script>
 </body>
 </html>
-
-</html>
-
-
-
+``
