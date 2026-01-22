@@ -244,4 +244,36 @@
 </html>
 ``
 
+<script>
+  // Convert "HH:MM" (24h) to "h:MM AM/PM"
+  function to12Hour(hhmm) {
+    const m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(hhmm);
+    if (!m) return hhmm; // not a simple time
+    let h = parseInt(m[1], 10);
+    const min = m[2];
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return `${h}:${min} ${ampm}`;
+  }
+
+  // Convert a field that may be a single time or a range:
+  // e.g., "14:00-16:30" or "09:15 – 12:00"
+  function formatTimeField(value) {
+    if (!value) return value;
+
+    // If it already contains AM/PM, assume it’s good
+    if (/\b(am|pm)\b/i.test(value)) return value;
+
+    // Normalize dash types (hyphen, en dash, em dash)
+    const parts = value.split(/\s*[-–—]\s*/);
+    if (parts.length === 1) {
+      return to12Hour(parts[0]);
+    } else if (parts.length === 2) {
+      return `${to12Hour(parts[0])} - ${to12Hour(parts[1])}`;
+    }
+    return value;
+  }
+</script>
+
+
 
