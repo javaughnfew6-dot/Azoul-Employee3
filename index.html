@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -91,6 +90,42 @@
     function showError(message) {
       console.error(message);
       errorBox.innerHTML = `<div class="error-box"><strong>Error:</strong>\n${message}</div>`;
+    }
+
+    // ✅ OPTION B: Format time so it shows like "4:30 PM"
+    function formatTime(value) {
+      if (!value) return "";
+      const v = String(value).trim();
+
+      // 1) Google Sheets serial number (time only like 0.1875 OR date+time like 45123.1875)
+      if (/^\d+(\.\d+)?$/.test(v)) {
+        const num = parseFloat(v);
+        const frac = num % 1; // fractional part = time-of-day
+        const totalMinutes = Math.round(frac * 24 * 60);
+
+        let hours = Math.floor(totalMinutes / 60);
+        let mins  = totalMinutes % 60;
+
+        const ampm = hours >= 12 ? "PM" : "AM";
+        hours = hours % 12;
+        if (hours === 0) hours = 12;
+
+        return `${hours}:${String(mins).padStart(2, "0")} ${ampm}`;
+      }
+
+      // 2) Already looks like "4:30" or "4:30 PM" — normalize AM/PM casing
+      if (/^\d{1,2}:\d{2}(\s?[APap][Mm])?$/.test(v)) {
+        return v.replace(/\s*(am|pm)$/i, m => " " + m.toUpperCase());
+      }
+
+      // 3) Date-time string (ISO, etc.) — parse and show only time
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      }
+
+      // fallback
+      return v;
     }
 
     // Robust CSV parser that respects quotes and commas inside quotes
@@ -194,7 +229,11 @@
           const name    = (idx.name   >= 0 ? get(idx.name)    : cols[0]) || "No Name";
           const phone   = (idx.phone  >= 0 ? get(idx.phone)   : "");
           const service = (idx.service>= 0 ? get(idx.service) : "");
-          const time    = (idx.time   >= 0 ? get(idx.time)    : "");
+
+          // ✅ Changed: read raw time then format it
+          const timeRaw = (idx.time   >= 0 ? get(idx.time)    : "");
+          const time    = formatTime(timeRaw);
+
           const codesRaw= (idx.codes  >= 0 ? get(idx.codes)   : "");
 
           const codes = splitCodes(codesRaw);
@@ -242,9 +281,3 @@
   </script>
 </body>
 </html>
-
-
-
-
-
-
